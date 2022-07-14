@@ -1,5 +1,4 @@
 export * from './account';
-export * from './address-lookup-table-program';
 export * from './blockhash';
 export * from './bpf-loader-deprecated';
 export * from './bpf-loader';
@@ -26,7 +25,6 @@ export * from './errors';
 export * from './util/borsh-schema';
 export * from './util/send-and-confirm-transaction';
 export * from './util/send-and-confirm-raw-transaction';
-export * from './util/tx-expiry-custom-errors';
 export * from './util/cluster';
 
 /**

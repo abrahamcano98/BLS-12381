@@ -83,7 +83,7 @@ fn check_unpack_result(unpack_result: bool, path: String) -> Result<()> {
     Ok(())
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq)]
 pub enum UnpackPath<'a> {
     Valid(&'a Path),
     Ignore,

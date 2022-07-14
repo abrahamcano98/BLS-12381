@@ -11,8 +11,8 @@ use {
         accounts_hash::{CalcAccountsHashConfig, HashStats},
         snapshot_config::SnapshotConfig,
         snapshot_package::{
-            retain_max_n_elements, AccountsPackage, PendingAccountsPackage, PendingSnapshotPackage,
-            SnapshotPackage, SnapshotType,
+            AccountsPackage, PendingAccountsPackage, PendingSnapshotPackage, SnapshotPackage,
+            SnapshotType,
         },
         sorted_storages::SortedStorages,
     },
@@ -147,31 +147,6 @@ impl AccountsHashVerifier {
             )
             .unwrap();
 
-        if accounts_package.expected_capitalization != lamports {
-            // before we assert, run the hash calc again. This helps track down whether it could have been a failure in a race condition possibly with shrink.
-            // We could add diagnostics to the hash calc here to produce a per bin cap or something to help narrow down how many pubkeys are different.
-            let _ = accounts_package
-                .accounts
-                .accounts_db
-                .calculate_accounts_hash_without_index(
-                    &CalcAccountsHashConfig {
-                        use_bg_thread_pool: false,
-                        check_hash: false,
-                        ancestors: None,
-                        use_write_cache: false,
-                        epoch_schedule: &accounts_package.epoch_schedule,
-                        rent_collector: &accounts_package.rent_collector,
-                    },
-                    &sorted_storages,
-                    HashStats::default(),
-                );
-        }
-
-        assert_eq!(accounts_package.expected_capitalization, lamports);
-        if let Some(expected_hash) = accounts_package.accounts_hash_for_testing {
-            assert_eq!(expected_hash, accounts_hash);
-        };
-
         accounts_package
             .accounts
             .accounts_db
@@ -179,6 +154,11 @@ impl AccountsHashVerifier {
                 sorted_storages.max_slot_inclusive(),
                 &accounts_package.epoch_schedule,
             );
+
+        assert_eq!(accounts_package.expected_capitalization, lamports);
+        if let Some(expected_hash) = accounts_package.accounts_hash_for_testing {
+            assert_eq!(expected_hash, accounts_hash);
+        };
 
         measure_hash.stop();
         solana_runtime::serde_snapshot::reserialize_bank_with_new_accounts_hash(
@@ -191,16 +171,6 @@ impl AccountsHashVerifier {
             ("calculate_hash", measure_hash.as_us(), i64),
         );
         accounts_hash
-    }
-
-    fn generate_fault_hash(original_hash: &Hash) -> Hash {
-        use {
-            rand::{thread_rng, Rng},
-            solana_sdk::hash::extend_and_hash,
-        };
-
-        let rand = thread_rng().gen_range(0, 10);
-        extend_and_hash(original_hash, &[rand])
     }
 
     fn push_accounts_hashes_to_cluster(
@@ -217,14 +187,21 @@ impl AccountsHashVerifier {
             && accounts_package.slot % fault_injection_rate_slots == 0
         {
             // For testing, publish an invalid hash to gossip.
-            let fault_hash = Self::generate_fault_hash(&accounts_hash);
+            use {
+                rand::{thread_rng, Rng},
+                solana_sdk::hash::extend_and_hash,
+            };
             warn!("inserting fault at slot: {}", accounts_package.slot);
-            hashes.push((accounts_package.slot, fault_hash));
+            let rand = thread_rng().gen_range(0, 10);
+            let hash = extend_and_hash(&accounts_hash, &[rand]);
+            hashes.push((accounts_package.slot, hash));
         } else {
             hashes.push((accounts_package.slot, accounts_hash));
         }
 
-        retain_max_n_elements(hashes, MAX_SNAPSHOT_HASHES);
+        while hashes.len() > MAX_SNAPSHOT_HASHES {
+            hashes.remove(0);
+        }
 
         if halt_on_known_validator_accounts_hash_mismatch {
             let mut slot_to_hash = HashMap::new();
@@ -254,6 +231,7 @@ impl AccountsHashVerifier {
 
         let snapshot_package = SnapshotPackage::new(accounts_package, accounts_hash);
         let pending_snapshot_package = pending_snapshot_package.unwrap();
+        let _snapshot_config = snapshot_config.unwrap();
 
         // If the snapshot package is an Incremental Snapshot, do not submit it if there's already
         // a pending Full Snapshot.

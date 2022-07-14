@@ -19,7 +19,7 @@ pub fn serialize_parameters(
     instruction_context: &InstructionContext,
 ) -> Result<(AlignedMemory, Vec<usize>), InstructionError> {
     let is_loader_deprecated = *instruction_context
-        .try_borrow_last_program_account(transaction_context)?
+        .try_borrow_program_account(transaction_context)?
         .get_owner()
         == bpf_loader_deprecated::id();
     if is_loader_deprecated {
@@ -28,10 +28,11 @@ pub fn serialize_parameters(
         serialize_parameters_aligned(transaction_context, instruction_context)
     }
     .and_then(|buffer| {
-        let account_lengths = (0..instruction_context.get_number_of_instruction_accounts())
-            .map(|instruction_account_index| {
+        let account_lengths = (instruction_context.get_number_of_program_accounts()
+            ..instruction_context.get_number_of_accounts())
+            .map(|index_in_instruction| {
                 Ok(instruction_context
-                    .try_borrow_instruction_account(transaction_context, instruction_account_index)?
+                    .try_borrow_account(transaction_context, index_in_instruction)?
                     .get_data()
                     .len())
             })
@@ -47,7 +48,7 @@ pub fn deserialize_parameters(
     account_lengths: &[usize],
 ) -> Result<(), InstructionError> {
     let is_loader_deprecated = *instruction_context
-        .try_borrow_last_program_account(transaction_context)?
+        .try_borrow_program_account(transaction_context)?
         .get_owner()
         == bpf_loader_deprecated::id();
     if is_loader_deprecated {
@@ -73,13 +74,14 @@ pub fn serialize_parameters_unaligned(
 ) -> Result<AlignedMemory, InstructionError> {
     // Calculate size in order to alloc once
     let mut size = size_of::<u64>();
-    for instruction_account_index in 0..instruction_context.get_number_of_instruction_accounts() {
-        let duplicate =
-            instruction_context.is_instruction_account_duplicate(instruction_account_index)?;
+    for index_in_instruction in instruction_context.get_number_of_program_accounts()
+        ..instruction_context.get_number_of_accounts()
+    {
+        let duplicate = instruction_context.is_duplicate(index_in_instruction)?;
         size += 1; // dup
         if duplicate.is_none() {
             let data_len = instruction_context
-                .try_borrow_instruction_account(transaction_context, instruction_account_index)?
+                .try_borrow_account(transaction_context, index_in_instruction)?
                 .get_data()
                 .len();
             size += size_of::<u8>() // is_signer
@@ -100,15 +102,16 @@ pub fn serialize_parameters_unaligned(
 
     v.write_u64::<LittleEndian>(instruction_context.get_number_of_instruction_accounts() as u64)
         .map_err(|_| InstructionError::InvalidArgument)?;
-    for instruction_account_index in 0..instruction_context.get_number_of_instruction_accounts() {
-        let duplicate =
-            instruction_context.is_instruction_account_duplicate(instruction_account_index)?;
+    for index_in_instruction in instruction_context.get_number_of_program_accounts()
+        ..instruction_context.get_number_of_accounts()
+    {
+        let duplicate = instruction_context.is_duplicate(index_in_instruction)?;
         if let Some(position) = duplicate {
             v.write_u8(position as u8)
                 .map_err(|_| InstructionError::InvalidArgument)?;
         } else {
             let borrowed_account = instruction_context
-                .try_borrow_instruction_account(transaction_context, instruction_account_index)?;
+                .try_borrow_account(transaction_context, index_in_instruction)?;
             v.write_u8(std::u8::MAX)
                 .map_err(|_| InstructionError::InvalidArgument)?;
             v.write_u8(borrowed_account.is_signer() as u8)
@@ -137,7 +140,7 @@ pub fn serialize_parameters_unaligned(
         .map_err(|_| InstructionError::InvalidArgument)?;
     v.write_all(
         instruction_context
-            .try_borrow_last_program_account(transaction_context)?
+            .try_borrow_program_account(transaction_context)?
             .get_key()
             .as_ref(),
     )
@@ -152,15 +155,15 @@ pub fn deserialize_parameters_unaligned(
     account_lengths: &[usize],
 ) -> Result<(), InstructionError> {
     let mut start = size_of::<u64>(); // number of accounts
-    for (instruction_account_index, pre_len) in
-        (0..instruction_context.get_number_of_instruction_accounts()).zip(account_lengths.iter())
+    for (index_in_instruction, pre_len) in (instruction_context.get_number_of_program_accounts()
+        ..instruction_context.get_number_of_accounts())
+        .zip(account_lengths.iter())
     {
-        let duplicate =
-            instruction_context.is_instruction_account_duplicate(instruction_account_index)?;
+        let duplicate = instruction_context.is_duplicate(index_in_instruction)?;
         start += 1; // is_dup
         if duplicate.is_none() {
             let mut borrowed_account = instruction_context
-                .try_borrow_instruction_account(transaction_context, instruction_account_index)?;
+                .try_borrow_account(transaction_context, index_in_instruction)?;
             start += size_of::<u8>(); // is_signer
             start += size_of::<u8>(); // is_writable
             start += size_of::<Pubkey>(); // key
@@ -191,21 +194,22 @@ pub fn serialize_parameters_aligned(
 ) -> Result<AlignedMemory, InstructionError> {
     // Calculate size in order to alloc once
     let mut size = size_of::<u64>();
-    for instruction_account_index in 0..instruction_context.get_number_of_instruction_accounts() {
-        let duplicate =
-            instruction_context.is_instruction_account_duplicate(instruction_account_index)?;
+    for index_in_instruction in instruction_context.get_number_of_program_accounts()
+        ..instruction_context.get_number_of_accounts()
+    {
+        let duplicate = instruction_context.is_duplicate(index_in_instruction)?;
         size += 1; // dup
         if duplicate.is_some() {
             size += 7; // padding to 64-bit aligned
         } else {
             let data_len = instruction_context
-                .try_borrow_instruction_account(transaction_context, instruction_account_index)?
+                .try_borrow_account(transaction_context, index_in_instruction)?
                 .get_data()
                 .len();
             size += size_of::<u8>() // is_signer
                 + size_of::<u8>() // is_writable
                 + size_of::<u8>() // executable
-                + size_of::<u32>() // original_data_len
+                + 4 // padding to 128-bit aligned
                 + size_of::<Pubkey>()  // key
                 + size_of::<Pubkey>() // owner
                 + size_of::<u64>()  // lamports
@@ -224,9 +228,10 @@ pub fn serialize_parameters_aligned(
     // Serialize into the buffer
     v.write_u64::<LittleEndian>(instruction_context.get_number_of_instruction_accounts() as u64)
         .map_err(|_| InstructionError::InvalidArgument)?;
-    for instruction_account_index in 0..instruction_context.get_number_of_instruction_accounts() {
-        let duplicate =
-            instruction_context.is_instruction_account_duplicate(instruction_account_index)?;
+    for index_in_instruction in instruction_context.get_number_of_program_accounts()
+        ..instruction_context.get_number_of_accounts()
+    {
+        let duplicate = instruction_context.is_duplicate(index_in_instruction)?;
         if let Some(position) = duplicate {
             v.write_u8(position as u8)
                 .map_err(|_| InstructionError::InvalidArgument)?;
@@ -234,7 +239,7 @@ pub fn serialize_parameters_aligned(
                 .map_err(|_| InstructionError::InvalidArgument)?; // 7 bytes of padding to make 64-bit aligned
         } else {
             let borrowed_account = instruction_context
-                .try_borrow_instruction_account(transaction_context, instruction_account_index)?;
+                .try_borrow_account(transaction_context, index_in_instruction)?;
             v.write_u8(std::u8::MAX)
                 .map_err(|_| InstructionError::InvalidArgument)?;
             v.write_u8(borrowed_account.is_signer() as u8)
@@ -271,7 +276,7 @@ pub fn serialize_parameters_aligned(
         .map_err(|_| InstructionError::InvalidArgument)?;
     v.write_all(
         instruction_context
-            .try_borrow_last_program_account(transaction_context)?
+            .try_borrow_program_account(transaction_context)?
             .get_key()
             .as_ref(),
     )
@@ -286,21 +291,21 @@ pub fn deserialize_parameters_aligned(
     account_lengths: &[usize],
 ) -> Result<(), InstructionError> {
     let mut start = size_of::<u64>(); // number of accounts
-    for (instruction_account_index, pre_len) in
-        (0..instruction_context.get_number_of_instruction_accounts()).zip(account_lengths.iter())
+    for (index_in_instruction, pre_len) in (instruction_context.get_number_of_program_accounts()
+        ..instruction_context.get_number_of_accounts())
+        .zip(account_lengths.iter())
     {
-        let duplicate =
-            instruction_context.is_instruction_account_duplicate(instruction_account_index)?;
+        let duplicate = instruction_context.is_duplicate(index_in_instruction)?;
         start += size_of::<u8>(); // position
         if duplicate.is_some() {
             start += 7; // padding to 64-bit aligned
         } else {
             let mut borrowed_account = instruction_context
-                .try_borrow_instruction_account(transaction_context, instruction_account_index)?;
+                .try_borrow_account(transaction_context, index_in_instruction)?;
             start += size_of::<u8>() // is_signer
                 + size_of::<u8>() // is_writable
                 + size_of::<u8>() // executable
-                + size_of::<u32>() // original_data_len
+                + 4 // padding to 128-bit aligned
                 + size_of::<Pubkey>(); // key
             let _ = borrowed_account.set_owner(
                 buffer
@@ -437,13 +442,11 @@ mod tests {
         let instruction_accounts = [1, 1, 2, 3, 4, 4, 5, 6]
             .into_iter()
             .enumerate()
-            .map(
-                |(instruction_account_index, index_in_transaction)| AccountMeta {
-                    pubkey: transaction_accounts.get(index_in_transaction).unwrap().0,
-                    is_signer: false,
-                    is_writable: instruction_account_index >= 4,
-                },
-            )
+            .map(|(index_in_instruction, index_in_transaction)| AccountMeta {
+                pubkey: transaction_accounts.get(index_in_transaction).unwrap().0,
+                is_signer: false,
+                is_writable: index_in_instruction >= 4,
+            })
             .collect();
         let instruction_data = vec![1u8, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
         let program_indices = [0];
@@ -549,7 +552,7 @@ mod tests {
             .transaction_context
             .get_current_instruction_context()
             .unwrap()
-            .try_borrow_program_account(invoke_context.transaction_context, 0)
+            .try_borrow_account(invoke_context.transaction_context, 0)
             .unwrap()
             .set_owner(bpf_loader_deprecated::id().as_ref());
 

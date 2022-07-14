@@ -22,12 +22,7 @@ export RUSTFLAGS="-D warnings"
 source scripts/ulimit-n.sh
 
 # limit jobs to 4gb/thread
-if [[ -f "/proc/meminfo" ]]; then
-  JOBS=$(grep MemTotal /proc/meminfo | awk '{printf "%.0f", ($2 / (4 * 1024 * 1024))}')
-else
-  JOBS=$(sysctl hw.memsize | awk '{printf "%.0f", ($2 / (4 * 1024**3))}')
-fi
-
+JOBS=$(grep MemTotal /proc/meminfo | awk '{printf "%.0f", ($2 / (4 * 1024 * 1024))}')
 NPROC=$(nproc)
 JOBS=$((JOBS>NPROC ? NPROC : JOBS))
 
@@ -69,14 +64,7 @@ test-stable-bpf)
       "$cargo_test_bpf" --bpf-sdk ../../../../sdk/bpf
       popd
     fi
-  done |& tee cargo.log
-  solana_program_count=$(grep -c 'solana-program v' cargo.log)
-  rm -f cargo.log
-  if ((solana_program_count > 10)); then
-      echo "Regression of build redundancy ${solana_program_count}."
-      echo "Review dependency features that trigger redundant rebuilds of solana-program."
-      exit 1
-  fi
+  done
 
   # bpf-tools version
   "$cargo_build_bpf" -V

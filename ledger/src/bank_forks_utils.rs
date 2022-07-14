@@ -104,10 +104,7 @@ pub fn load_bank_forks(
         {
             true
         } else {
-            warn!(
-                "No snapshot package found in directory: {:?}; will load from genesis",
-                &snapshot_config.full_snapshot_archives_dir
-            );
+            info!("No snapshot package available; will load from genesis");
             false
         }
     } else {

@@ -24,12 +24,12 @@ pub struct ClientStats {
 }
 
 #[enum_dispatch]
-pub enum BlockingConnection {
+pub enum Connection {
     UdpTpuConnection,
     QuicTpuConnection,
 }
 
-#[enum_dispatch(BlockingConnection)]
+#[enum_dispatch(Connection)]
 pub trait TpuConnection {
     fn tpu_addr(&self) -> &SocketAddr;
 
@@ -44,7 +44,7 @@ pub trait TpuConnection {
 
     fn send_wire_transaction<T>(&self, wire_transaction: T) -> TransportResult<()>
     where
-        T: AsRef<[u8]> + Send + Sync,
+        T: AsRef<[u8]>,
     {
         self.send_wire_transaction_batch(&[wire_transaction])
     }
@@ -65,7 +65,7 @@ pub trait TpuConnection {
 
     fn send_wire_transaction_batch<T>(&self, buffers: &[T]) -> TransportResult<()>
     where
-        T: AsRef<[u8]> + Send + Sync;
+        T: AsRef<[u8]>;
 
     fn send_wire_transaction_batch_async(&self, buffers: Vec<Vec<u8>>) -> TransportResult<()>;
 }

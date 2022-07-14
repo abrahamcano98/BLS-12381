@@ -24,6 +24,7 @@ fn process_authorize_with_seed_instruction(
     invoke_context: &InvokeContext,
     instruction_context: &InstructionContext,
     transaction_context: &TransactionContext,
+    first_instruction_account: usize,
     vote_account: &mut BorrowedAccount,
     new_authority: &Pubkey,
     authorization_type: VoteAuthorize,
@@ -38,9 +39,10 @@ fn process_authorize_with_seed_instruction(
     }
     let clock = get_sysvar_with_account_check::clock(invoke_context, instruction_context, 1)?;
     let mut expected_authority_keys: HashSet<Pubkey> = HashSet::default();
-    if instruction_context.is_instruction_account_signer(2)? {
+    let authority_base_key_index = first_instruction_account + 2;
+    if instruction_context.is_signer(authority_base_key_index)? {
         let base_pubkey = transaction_context.get_key_of_account_at_index(
-            instruction_context.get_index_of_instruction_account_in_transaction(2)?,
+            instruction_context.get_index_in_transaction(authority_base_key_index)?,
         )?;
         expected_authority_keys.insert(Pubkey::create_with_seed(
             base_pubkey,
@@ -59,7 +61,7 @@ fn process_authorize_with_seed_instruction(
 }
 
 pub fn process_instruction(
-    _first_instruction_account: usize,
+    first_instruction_account: usize,
     invoke_context: &mut InvokeContext,
 ) -> Result<(), InstructionError> {
     let transaction_context = &invoke_context.transaction_context;
@@ -68,7 +70,8 @@ pub fn process_instruction(
 
     trace!("process_instruction: {:?}", data);
 
-    let mut me = instruction_context.try_borrow_instruction_account(transaction_context, 0)?;
+    let mut me =
+        instruction_context.try_borrow_account(transaction_context, first_instruction_account)?;
     if *me.get_owner() != id() {
         return Err(InstructionError::InvalidAccountOwner);
     }
@@ -102,6 +105,7 @@ pub fn process_instruction(
                 invoke_context,
                 instruction_context,
                 transaction_context,
+                first_instruction_account,
                 &mut me,
                 &args.new_authority,
                 args.authorization_type,
@@ -111,16 +115,18 @@ pub fn process_instruction(
         }
         VoteInstruction::AuthorizeCheckedWithSeed(args) => {
             instruction_context.check_number_of_instruction_accounts(4)?;
+            let new_authority_index = first_instruction_account + 3;
             let new_authority = transaction_context.get_key_of_account_at_index(
-                instruction_context.get_index_of_instruction_account_in_transaction(3)?,
+                instruction_context.get_index_in_transaction(new_authority_index)?,
             )?;
-            if !instruction_context.is_instruction_account_signer(3)? {
+            if !instruction_context.is_signer(new_authority_index)? {
                 return Err(InstructionError::MissingRequiredSignature);
             }
             process_authorize_with_seed_instruction(
                 invoke_context,
                 instruction_context,
                 transaction_context,
+                first_instruction_account,
                 &mut me,
                 new_authority,
                 args.authorization_type,
@@ -131,7 +137,7 @@ pub fn process_instruction(
         VoteInstruction::UpdateValidatorIdentity => {
             instruction_context.check_number_of_instruction_accounts(2)?;
             let node_pubkey = transaction_context.get_key_of_account_at_index(
-                instruction_context.get_index_of_instruction_account_in_transaction(1)?,
+                instruction_context.get_index_in_transaction(first_instruction_account + 1)?,
             )?;
             vote_state::update_validator_identity(&mut me, node_pubkey, &signers)
         }
@@ -175,7 +181,14 @@ pub fn process_instruction(
         }
         VoteInstruction::Withdraw(lamports) => {
             instruction_context.check_number_of_instruction_accounts(2)?;
-            let rent_sysvar = invoke_context.get_sysvar_cache().get_rent()?;
+            let rent_sysvar = if invoke_context
+                .feature_set
+                .is_active(&feature_set::reject_non_rent_exempt_vote_withdraws::id())
+            {
+                Some(invoke_context.get_sysvar_cache().get_rent()?)
+            } else {
+                None
+            };
 
             let clock_if_feature_active = if invoke_context
                 .feature_set
@@ -190,11 +203,11 @@ pub fn process_instruction(
             vote_state::withdraw(
                 transaction_context,
                 instruction_context,
-                0,
+                first_instruction_account,
                 lamports,
-                1,
+                first_instruction_account + 1,
                 &signers,
-                &rent_sysvar,
+                rent_sysvar.as_deref(),
                 clock_if_feature_active.as_deref(),
             )
         }
@@ -205,9 +218,9 @@ pub fn process_instruction(
             {
                 instruction_context.check_number_of_instruction_accounts(4)?;
                 let voter_pubkey = transaction_context.get_key_of_account_at_index(
-                    instruction_context.get_index_of_instruction_account_in_transaction(3)?,
+                    instruction_context.get_index_in_transaction(first_instruction_account + 3)?,
                 )?;
-                if !instruction_context.is_instruction_account_signer(3)? {
+                if !instruction_context.is_signer(first_instruction_account + 3)? {
                     return Err(InstructionError::MissingRequiredSignature);
                 }
                 let clock =
@@ -489,7 +502,7 @@ mod tests {
             AccountMeta {
                 pubkey: vote_pubkey,
                 is_signer: false,
-                is_writable: true,
+                is_writable: false,
             },
             AccountMeta {
                 pubkey: sysvar::rent::id(),
@@ -580,7 +593,7 @@ mod tests {
             AccountMeta {
                 pubkey: vote_pubkey,
                 is_signer: false,
-                is_writable: true,
+                is_writable: false,
             },
             AccountMeta {
                 pubkey: node_pubkey,
@@ -648,7 +661,7 @@ mod tests {
             AccountMeta {
                 pubkey: vote_pubkey,
                 is_signer: false,
-                is_writable: true,
+                is_writable: false,
             },
             AccountMeta {
                 pubkey: authorized_withdrawer,
@@ -711,7 +724,7 @@ mod tests {
             AccountMeta {
                 pubkey: vote_pubkey,
                 is_signer: true,
-                is_writable: true,
+                is_writable: false,
             },
             AccountMeta {
                 pubkey: sysvar::slot_hashes::id(),
@@ -826,7 +839,7 @@ mod tests {
             AccountMeta {
                 pubkey: vote_pubkey,
                 is_signer: true,
-                is_writable: true,
+                is_writable: false,
             },
             AccountMeta {
                 pubkey: sysvar::clock::id(),
@@ -940,7 +953,7 @@ mod tests {
             AccountMeta {
                 pubkey: vote_pubkey,
                 is_signer: true,
-                is_writable: true,
+                is_writable: false,
             },
             AccountMeta {
                 pubkey: sysvar::clock::id(),
@@ -1021,7 +1034,7 @@ mod tests {
             AccountMeta {
                 pubkey: vote_pubkey,
                 is_signer: true,
-                is_writable: true,
+                is_writable: false,
             },
             AccountMeta {
                 pubkey: sysvar::clock::id(),
@@ -1045,7 +1058,7 @@ mod tests {
         instruction_accounts[1] = AccountMeta {
             pubkey: authorized_withdrawer_pubkey,
             is_signer: true,
-            is_writable: true,
+            is_writable: false,
         };
         transaction_accounts[0] = (vote_pubkey, accounts[0].clone());
         let accounts = process_instruction(
@@ -1129,12 +1142,12 @@ mod tests {
             AccountMeta {
                 pubkey: vote_pubkey_1,
                 is_signer: true,
-                is_writable: true,
+                is_writable: false,
             },
             AccountMeta {
-                pubkey: authorized_withdrawer_pubkey,
+                pubkey: sysvar::clock::id(),
                 is_signer: false,
-                is_writable: true,
+                is_writable: false,
             },
         ];
 
@@ -1171,11 +1184,30 @@ mod tests {
             &serialize(&VoteInstruction::Withdraw(lamports)).unwrap(),
             transaction_accounts.clone(),
             instruction_accounts.clone(),
-            Err(VoteError::ActiveVoteAccountClose.into()),
+            Err(InstructionError::ActiveVoteAccountClose),
         );
 
-        // Following features disabled:
+        // Both features disabled:
+        // reject_non_rent_exempt_vote_withdraws
         // reject_vote_account_close_unless_zero_credit_epoch
+
+        // non rent exempt withdraw, with 0 credit epoch
+        instruction_accounts[0].pubkey = vote_pubkey_1;
+        process_instruction_disabled_features(
+            &serialize(&VoteInstruction::Withdraw(lamports - minimum_balance + 1)).unwrap(),
+            transaction_accounts.clone(),
+            instruction_accounts.clone(),
+            Ok(()),
+        );
+
+        // non rent exempt withdraw, without 0 credit epoch
+        instruction_accounts[0].pubkey = vote_pubkey_2;
+        process_instruction_disabled_features(
+            &serialize(&VoteInstruction::Withdraw(lamports - minimum_balance + 1)).unwrap(),
+            transaction_accounts.clone(),
+            instruction_accounts.clone(),
+            Ok(()),
+        );
 
         // full withdraw, with 0 credit epoch
         instruction_accounts[0].pubkey = vote_pubkey_1;
@@ -1871,7 +1903,7 @@ mod tests {
             AccountMeta {
                 pubkey: vote_pubkey,
                 is_signer: false,
-                is_writable: true,
+                is_writable: false,
             },
             AccountMeta {
                 pubkey: clock_address,

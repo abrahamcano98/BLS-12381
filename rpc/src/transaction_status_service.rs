@@ -74,7 +74,6 @@ impl TransactionStatusService {
                 balances,
                 token_balances,
                 rent_debits,
-                transaction_indexes,
             }) => {
                 let slot = bank.slot();
                 for (
@@ -85,7 +84,6 @@ impl TransactionStatusService {
                     pre_token_balances,
                     post_token_balances,
                     rent_debits,
-                    transaction_index,
                 ) in izip!(
                     transactions,
                     execution_results,
@@ -94,7 +92,6 @@ impl TransactionStatusService {
                     token_balances.pre_token_balances,
                     token_balances.post_token_balances,
                     rent_debits,
-                    transaction_indexes,
                 ) {
                     if let Some(details) = execution_result {
                         let TransactionExecutionDetails {
@@ -165,7 +162,6 @@ impl TransactionStatusService {
                         if let Some(transaction_notifier) = transaction_notifier.as_ref() {
                             transaction_notifier.write().unwrap().notify_transaction(
                                 slot,
-                                transaction_index,
                                 transaction.signature(),
                                 &transaction_status_meta,
                                 &transaction,
@@ -251,20 +247,8 @@ pub(crate) mod tests {
         },
     };
 
-    #[derive(Eq, Hash, PartialEq)]
-    struct TestNotifierKey {
-        slot: Slot,
-        transaction_index: usize,
-        signature: Signature,
-    }
-
-    struct TestNotification {
-        _meta: TransactionStatusMeta,
-        transaction: SanitizedTransaction,
-    }
-
     struct TestTransactionNotifier {
-        notifications: DashMap<TestNotifierKey, TestNotification>,
+        notifications: DashMap<(Slot, Signature), (TransactionStatusMeta, SanitizedTransaction)>,
     }
 
     impl TestTransactionNotifier {
@@ -279,21 +263,13 @@ pub(crate) mod tests {
         fn notify_transaction(
             &self,
             slot: Slot,
-            transaction_index: usize,
             signature: &Signature,
             transaction_status_meta: &TransactionStatusMeta,
             transaction: &SanitizedTransaction,
         ) {
             self.notifications.insert(
-                TestNotifierKey {
-                    slot,
-                    transaction_index,
-                    signature: *signature,
-                },
-                TestNotification {
-                    _meta: transaction_status_meta.clone(),
-                    transaction: transaction.clone(),
-                },
+                (slot, *signature),
+                (transaction_status_meta.clone(), transaction.clone()),
             );
         }
     }
@@ -347,13 +323,16 @@ pub(crate) mod tests {
         let expected_transaction = transaction.clone();
         let pubkey = Pubkey::new_unique();
 
-        let mut nonce_account = nonce_account::create_account(1).into_inner();
-        let durable_nonce = DurableNonce::from_blockhash(&Hash::new(&[42u8; 32]));
+        let mut nonce_account =
+            nonce_account::create_account(1, /*separate_domains:*/ true).into_inner();
+        let durable_nonce =
+            DurableNonce::from_blockhash(&Hash::new(&[42u8; 32]), /*separate_domains:*/ true);
         let data = nonce::state::Data::new(Pubkey::new(&[1u8; 32]), durable_nonce, 42);
         nonce_account
-            .set_state(&nonce::state::Versions::new(nonce::State::Initialized(
-                data,
-            )))
+            .set_state(&nonce::state::Versions::new(
+                nonce::State::Initialized(data),
+                true, // separate_domains
+            ))
             .unwrap();
 
         let message = build_message();
@@ -411,7 +390,6 @@ pub(crate) mod tests {
 
         let slot = bank.slot();
         let signature = *transaction.signature();
-        let transaction_index: usize = bank.transaction_count().try_into().unwrap();
         let transaction_status_batch = TransactionStatusBatch {
             bank,
             transactions: vec![transaction],
@@ -419,7 +397,6 @@ pub(crate) mod tests {
             balances,
             token_balances,
             rent_debits: vec![rent_debits],
-            transaction_indexes: vec![transaction_index],
         };
 
         let test_notifier = Arc::new(RwLock::new(TestTransactionNotifier::new()));
@@ -444,17 +421,9 @@ pub(crate) mod tests {
         transaction_status_service.join().unwrap();
         let notifier = test_notifier.read().unwrap();
         assert_eq!(notifier.notifications.len(), 1);
-        let key = TestNotifierKey {
-            slot,
-            transaction_index,
-            signature,
-        };
-        assert!(notifier.notifications.contains_key(&key));
+        assert!(notifier.notifications.contains_key(&(slot, signature)));
 
-        let result = &*notifier.notifications.get(&key).unwrap();
-        assert_eq!(
-            expected_transaction.signature(),
-            result.transaction.signature()
-        );
+        let result = &*notifier.notifications.get(&(slot, signature)).unwrap();
+        assert_eq!(expected_transaction.signature(), result.1.signature());
     }
 }

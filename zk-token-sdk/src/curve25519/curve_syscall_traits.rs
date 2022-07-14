@@ -56,7 +56,7 @@ pub trait MultiScalarMultiplication {
     /// complications in computing the cost for the syscall. The computational costs should only
     /// depend on the length of the vectors (and the curve), so it would be ideal to support
     /// variable length inputs and compute the syscall cost as is done in eip-197:
-    /// <https://github.com/ethereum/EIPs/blob/master/EIPS/eip-197.md#gas-costs>. If not, then we can
+    /// https://github.com/ethereum/EIPs/blob/master/EIPS/eip-197.md#gas-costs. If not, then we can
     /// consider bounding the length of the input and assigning worst-case cost.
     fn multiscalar_multiply(
         scalars: &[Self::Scalar],
@@ -71,15 +71,16 @@ pub trait Pairing {
 
     /// Applies the bilinear pairing operation to two curve points P1, P2 -> e(P1, P2). This trait
     /// is only relevant for "pairing-friendly" curves such as BN254 and BLS12-381.
-    fn pairing_map(
-        left_point: &Self::G1Point,
-        right_point: &Self::G2Point,
-    ) -> Option<Self::GTPoint>;
+    fn pairing_map(pairing_vec: &[(Self::G1Point, Self::G2Point)]) -> Option<Self::GTPoint>;
 }
+
 
 pub const CURVE25519_EDWARDS: u64 = 0;
 pub const CURVE25519_RISTRETTO: u64 = 1;
+pub const CURVEBLS12381: u64 = 2;
 
 pub const ADD: u64 = 0;
 pub const SUB: u64 = 1;
 pub const MUL: u64 = 2;
+
+

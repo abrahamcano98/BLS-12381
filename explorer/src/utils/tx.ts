@@ -23,7 +23,7 @@ import { TokenInfoMap } from "@solana/spl-token-registry";
 
 export enum PROGRAM_NAMES {
   // native built-ins
-  ADDRESS_LOOKUP_TABLE = "Address Lookup Table Program",
+  ADDRESS_MAP = "Address Map Program",
   COMPUTE_BUDGET = "Compute Budget Program",
   CONFIG = "Config Program",
   STAKE = "Stake Program",
@@ -95,7 +95,6 @@ export enum PROGRAM_NAMES {
   WORMHOLE = "Wormhole",
   SOLANART = "Solanart",
   SOLANART_GO = "Solanart - Global offers",
-  STEPN_DEX = "STEPN Dex",
 }
 
 const ALL_CLUSTERS = [
@@ -114,8 +113,8 @@ export type ProgramInfo = {
 
 export const PROGRAM_INFO_BY_ID: { [address: string]: ProgramInfo } = {
   // native built-ins
-  AddressLookupTab1e1111111111111111111111111: {
-    name: PROGRAM_NAMES.ADDRESS_LOOKUP_TABLE,
+  AddressMap111111111111111111111111111111111: {
+    name: PROGRAM_NAMES.ADDRESS_MAP,
     deployments: ALL_CLUSTERS,
   },
   ComputeBudget111111111111111111111111111111: {
@@ -382,10 +381,6 @@ export const PROGRAM_INFO_BY_ID: { [address: string]: ProgramInfo } = {
   },
   "5ZfZAwP2m93waazg8DkrrVmsupeiPEvaEHowiUP7UAbJ": {
     name: PROGRAM_NAMES.SOLANART_GO,
-    deployments: [Cluster.MainnetBeta],
-  },
-  Dooar9JkhdZ7J3LHN3A7YCuoGRUggXhQaG4kijfLGU2j: {
-    name: PROGRAM_NAMES.STEPN_DEX,
     deployments: [Cluster.MainnetBeta],
   },
 };

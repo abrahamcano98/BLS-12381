@@ -10,7 +10,7 @@ use {
     },
 };
 
-struct Config<'a> {
+struct Config {
     sbf_sdk: Option<String>,
     sbf_out_dir: Option<String>,
     cargo: PathBuf,
@@ -25,10 +25,9 @@ struct Config<'a> {
     verbose: bool,
     workspace: bool,
     jobs: Option<String>,
-    arch: &'a str,
 }
 
-impl Default for Config<'_> {
+impl Default for Config {
     fn default() -> Self {
         Self {
             sbf_sdk: None,
@@ -45,7 +44,6 @@ impl Default for Config<'_> {
             verbose: false,
             workspace: false,
             jobs: None,
-            arch: "sbf",
         }
     }
 }
@@ -130,9 +128,6 @@ fn test_sbf_package(config: &Config, target_directory: &Path, package: &cargo_me
     }
     build_sbf_args.push("--sbf-out-dir");
     build_sbf_args.push(&sbf_out_dir);
-
-    build_sbf_args.push("--arch");
-    build_sbf_args.push(config.arch);
 
     spawn(
         &config.cargo_build_sbf,
@@ -317,13 +312,6 @@ fn main() {
                 .help("Number of parallel jobs, defaults to # of CPUs"),
         )
         .arg(
-            Arg::new("arch")
-                .long("arch")
-                .possible_values(&["sbf", "sbfv2"])
-                .default_value("sbf")
-                .help("Build for the given SBF version"),
-        )
-        .arg(
             Arg::new("extra_cargo_test_args")
                 .value_name("extra args for cargo test and the test binary")
                 .index(1)
@@ -349,7 +337,6 @@ fn main() {
         verbose: matches.is_present("verbose"),
         workspace: matches.is_present("workspace"),
         jobs: matches.value_of_t("jobs").ok(),
-        arch: matches.value_of("arch").unwrap(),
         ..Config::default()
     };
 

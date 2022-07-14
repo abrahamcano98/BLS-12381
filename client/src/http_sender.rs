@@ -12,7 +12,7 @@ use {
     log::*,
     reqwest::{
         self,
-        header::{self, CONTENT_TYPE, RETRY_AFTER},
+        header::{CONTENT_TYPE, RETRY_AFTER},
         StatusCode,
     },
     std::{
@@ -46,18 +46,8 @@ impl HttpSender {
     ///
     /// The URL is an HTTP URL, usually for port 8899.
     pub fn new_with_timeout<U: ToString>(url: U, timeout: Duration) -> Self {
-        let mut default_headers = header::HeaderMap::new();
-        default_headers.append(
-            header::HeaderName::from_static("solana-client"),
-            header::HeaderValue::from_str(
-                format!("rust/{}", solana_version::Version::default()).as_str(),
-            )
-            .unwrap(),
-        );
-
         let client = Arc::new(
             reqwest::Client::builder()
-                .default_headers(default_headers)
                 .timeout(timeout)
                 .build()
                 .expect("build rpc client"),

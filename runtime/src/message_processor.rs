@@ -120,16 +120,16 @@ impl MessageProcessor {
             }
 
             let mut instruction_accounts = Vec::with_capacity(instruction.accounts.len());
-            for (instruction_account_index, index_in_transaction) in
+            for (index_in_instruction, index_in_transaction) in
                 instruction.accounts.iter().enumerate()
             {
                 let index_in_callee = instruction
                     .accounts
-                    .get(0..instruction_account_index)
+                    .get(0..index_in_instruction)
                     .ok_or(TransactionError::InvalidAccountIndex)?
                     .iter()
                     .position(|account_index| account_index == index_in_transaction)
-                    .unwrap_or(instruction_account_index);
+                    .unwrap_or(index_in_instruction);
                 let index_in_transaction = *index_in_transaction as usize;
                 instruction_accounts.push(InstructionAccount {
                     index_in_transaction,

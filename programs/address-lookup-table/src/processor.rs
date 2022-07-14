@@ -18,7 +18,7 @@ use {
 };
 
 pub fn process_instruction(
-    _first_instruction_account: usize,
+    first_instruction_account: usize,
     invoke_context: &mut InvokeContext,
 ) -> Result<(), InstructionError> {
     let transaction_context = &invoke_context.transaction_context;
@@ -28,15 +28,24 @@ pub fn process_instruction(
         ProgramInstruction::CreateLookupTable {
             recent_slot,
             bump_seed,
-        } => Processor::create_lookup_table(invoke_context, recent_slot, bump_seed),
-        ProgramInstruction::FreezeLookupTable => Processor::freeze_lookup_table(invoke_context),
+        } => Processor::create_lookup_table(
+            invoke_context,
+            first_instruction_account,
+            recent_slot,
+            bump_seed,
+        ),
+        ProgramInstruction::FreezeLookupTable => {
+            Processor::freeze_lookup_table(invoke_context, first_instruction_account)
+        }
         ProgramInstruction::ExtendLookupTable { new_addresses } => {
-            Processor::extend_lookup_table(invoke_context, new_addresses)
+            Processor::extend_lookup_table(invoke_context, first_instruction_account, new_addresses)
         }
         ProgramInstruction::DeactivateLookupTable => {
-            Processor::deactivate_lookup_table(invoke_context)
+            Processor::deactivate_lookup_table(invoke_context, first_instruction_account)
         }
-        ProgramInstruction::CloseLookupTable => Processor::close_lookup_table(invoke_context),
+        ProgramInstruction::CloseLookupTable => {
+            Processor::close_lookup_table(invoke_context, first_instruction_account)
+        }
     }
 }
 
@@ -48,6 +57,7 @@ pub struct Processor;
 impl Processor {
     fn create_lookup_table(
         invoke_context: &mut InvokeContext,
+        _first_instruction_account: usize,
         untrusted_recent_slot: Slot,
         bump_seed: u8,
     ) -> Result<(), InstructionError> {
@@ -151,7 +161,10 @@ impl Processor {
         Ok(())
     }
 
-    fn freeze_lookup_table(invoke_context: &mut InvokeContext) -> Result<(), InstructionError> {
+    fn freeze_lookup_table(
+        invoke_context: &mut InvokeContext,
+        _first_instruction_account: usize,
+    ) -> Result<(), InstructionError> {
         let transaction_context = &invoke_context.transaction_context;
         let instruction_context = transaction_context.get_current_instruction_context()?;
 
@@ -204,6 +217,7 @@ impl Processor {
 
     fn extend_lookup_table(
         invoke_context: &mut InvokeContext,
+        _first_instruction_account: usize,
         new_addresses: Vec<Pubkey>,
     ) -> Result<(), InstructionError> {
         let transaction_context = &invoke_context.transaction_context;
@@ -321,7 +335,10 @@ impl Processor {
         Ok(())
     }
 
-    fn deactivate_lookup_table(invoke_context: &mut InvokeContext) -> Result<(), InstructionError> {
+    fn deactivate_lookup_table(
+        invoke_context: &mut InvokeContext,
+        _first_instruction_account: usize,
+    ) -> Result<(), InstructionError> {
         let transaction_context = &invoke_context.transaction_context;
         let instruction_context = transaction_context.get_current_instruction_context()?;
 
@@ -370,7 +387,10 @@ impl Processor {
         Ok(())
     }
 
-    fn close_lookup_table(invoke_context: &mut InvokeContext) -> Result<(), InstructionError> {
+    fn close_lookup_table(
+        invoke_context: &mut InvokeContext,
+        _first_instruction_account: usize,
+    ) -> Result<(), InstructionError> {
         let transaction_context = &invoke_context.transaction_context;
         let instruction_context = transaction_context.get_current_instruction_context()?;
 
@@ -391,8 +411,13 @@ impl Processor {
         drop(authority_account);
 
         instruction_context.check_number_of_instruction_accounts(3)?;
-        if instruction_context.get_index_of_instruction_account_in_transaction(0)?
-            == instruction_context.get_index_of_instruction_account_in_transaction(2)?
+        if instruction_context
+            .get_index_in_transaction(instruction_context.get_number_of_program_accounts())?
+            == instruction_context.get_index_in_transaction(
+                instruction_context
+                    .get_number_of_program_accounts()
+                    .saturating_add(2),
+            )?
         {
             ic_msg!(
                 invoke_context,

@@ -49,7 +49,9 @@ impl Poh {
     pub fn reset(&mut self, hash: Hash, hashes_per_tick: Option<u64>) {
         // retains ticks_per_slot: this cannot change without restarting the validator
         let tick_number = 0;
-        *self = Poh::new_with_slot_info(hash, hashes_per_tick, self.ticks_per_slot, tick_number);
+        let mut poh =
+            Poh::new_with_slot_info(hash, hashes_per_tick, self.ticks_per_slot, tick_number);
+        std::mem::swap(&mut poh, self);
     }
 
     pub fn target_poh_time(&self, target_ns_per_tick: u64) -> Instant {

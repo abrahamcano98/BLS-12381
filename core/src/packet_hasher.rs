@@ -4,12 +4,13 @@
 use {
     ahash::AHasher,
     rand::{thread_rng, Rng},
+    solana_ledger::shred::Shred,
     solana_perf::packet::Packet,
     std::hash::Hasher,
 };
 
 #[derive(Clone)]
-pub(crate) struct PacketHasher {
+pub struct PacketHasher {
     seed1: u128,
     seed2: u128,
 }
@@ -28,8 +29,8 @@ impl PacketHasher {
         self.hash_data(packet.data(..).unwrap_or_default())
     }
 
-    pub(crate) fn hash_shred(&self, shred: &[u8]) -> u64 {
-        self.hash_data(shred)
+    pub(crate) fn hash_shred(&self, shred: &Shred) -> u64 {
+        self.hash_data(shred.payload())
     }
 
     fn hash_data(&self, data: &[u8]) -> u64 {
@@ -38,7 +39,7 @@ impl PacketHasher {
         hasher.finish()
     }
 
-    pub(crate) fn reset(&mut self) {
+    pub fn reset(&mut self) {
         *self = Self::default();
     }
 }

@@ -4,38 +4,25 @@
 use {
     crate::{
         client_error::ClientErrorKind, connection_cache::ConnectionCacheStats,
-        nonblocking::tpu_connection::TpuConnection, tpu_connection::ClientStats,
+        tpu_connection::ClientStats,
     },
     async_mutex::Mutex,
-    async_trait::async_trait,
     futures::future::join_all,
     itertools::Itertools,
     log::*,
     quinn::{
-        ClientConfig, ConnectionError, Endpoint, EndpointConfig, IdleTimeout, NewConnection,
-        VarInt, WriteError,
+        ClientConfig, Endpoint, EndpointConfig, IdleTimeout, NewConnection, VarInt, WriteError,
     },
     solana_measure::measure::Measure,
     solana_net_utils::VALIDATOR_PORT_RANGE,
-    solana_sdk::{
-        quic::{
-            QUIC_CONNECTION_HANDSHAKE_TIMEOUT_MS, QUIC_KEEP_ALIVE_MS, QUIC_MAX_TIMEOUT_MS,
-            QUIC_MAX_UNSTAKED_CONCURRENT_STREAMS,
-        },
-        signature::Keypair,
-        transport::Result as TransportResult,
-    },
-    solana_streamer::{
-        nonblocking::quic::ALPN_TPU_PROTOCOL_ID,
-        tls_certificates::new_self_signed_tls_certificate_chain,
-    },
+    solana_sdk::quic::{QUIC_KEEP_ALIVE_MS, QUIC_MAX_CONCURRENT_STREAMS, QUIC_MAX_TIMEOUT_MS},
     std::{
         net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket},
         sync::{atomic::Ordering, Arc},
         thread,
         time::Duration,
     },
-    tokio::{sync::RwLock, time::timeout},
+    tokio::sync::RwLock,
 };
 
 struct SkipServerVerification;
@@ -60,49 +47,36 @@ impl rustls::client::ServerCertVerifier for SkipServerVerification {
     }
 }
 
-pub struct QuicClientCertificate {
-    pub certificates: Vec<rustls::Certificate>,
-    pub key: rustls::PrivateKey,
-}
-
 /// A lazy-initialized Quic Endpoint
 pub struct QuicLazyInitializedEndpoint {
     endpoint: RwLock<Option<Arc<Endpoint>>>,
-    client_certificate: Arc<QuicClientCertificate>,
 }
 
 impl QuicLazyInitializedEndpoint {
-    pub fn new(client_certificate: Arc<QuicClientCertificate>) -> Self {
+    pub fn new() -> Self {
         Self {
             endpoint: RwLock::new(None),
-            client_certificate,
         }
     }
 
-    fn create_endpoint(&self) -> Endpoint {
+    fn create_endpoint() -> Endpoint {
         let (_, client_socket) = solana_net_utils::bind_in_range(
             IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)),
             VALIDATOR_PORT_RANGE,
         )
-        .expect("QuicLazyInitializedEndpoint::create_endpoint bind_in_range");
+        .unwrap();
 
         let mut crypto = rustls::ClientConfig::builder()
             .with_safe_defaults()
             .with_custom_certificate_verifier(SkipServerVerification::new())
-            .with_single_cert(
-                self.client_certificate.certificates.clone(),
-                self.client_certificate.key.clone(),
-            )
-            .expect("Failed to set QUIC client certificates");
+            .with_no_client_auth();
         crypto.enable_early_data = true;
-        crypto.alpn_protocols = vec![ALPN_TPU_PROTOCOL_ID.to_vec()];
 
         let mut endpoint =
             QuicNewConnection::create_endpoint(EndpointConfig::default(), client_socket);
 
         let mut config = ClientConfig::new(Arc::new(crypto));
-        let transport_config = Arc::get_mut(&mut config.transport)
-            .expect("QuicLazyInitializedEndpoint::create_endpoint Arc::get_mut");
+        let transport_config = Arc::get_mut(&mut config.transport).unwrap();
         let timeout = IdleTimeout::from(VarInt::from_u32(QUIC_MAX_TIMEOUT_MS));
         transport_config.max_idle_timeout(Some(timeout));
         transport_config.keep_alive_interval(Some(Duration::from_millis(QUIC_KEEP_ALIVE_MS)));
@@ -125,7 +99,7 @@ impl QuicLazyInitializedEndpoint {
                 match endpoint {
                     Some(endpoint) => endpoint.clone(),
                     None => {
-                        let connection = Arc::new(self.create_endpoint());
+                        let connection = Arc::new(Self::create_endpoint());
                         *lock = Some(connection.clone());
                         connection
                     }
@@ -137,15 +111,7 @@ impl QuicLazyInitializedEndpoint {
 
 impl Default for QuicLazyInitializedEndpoint {
     fn default() -> Self {
-        let (certs, priv_key) = new_self_signed_tls_certificate_chain(
-            &Keypair::new(),
-            IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)),
-        )
-        .expect("Failed to create QUIC client certificate");
-        Self::new(Arc::new(QuicClientCertificate {
-            certificates: certs,
-            key: priv_key,
-        }))
+        Self::new()
     }
 }
 
@@ -167,39 +133,27 @@ impl QuicNewConnection {
         let mut make_connection_measure = Measure::start("make_connection_measure");
         let endpoint = endpoint.get_endpoint().await;
 
-        let connecting = endpoint
-            .connect(addr, "connect")
-            .expect("QuicNewConnection::make_connection endpoint.connect");
+        let connecting = endpoint.connect(addr, "connect").unwrap();
         stats.total_connections.fetch_add(1, Ordering::Relaxed);
-        if let Ok(connecting_result) = timeout(
-            Duration::from_millis(QUIC_CONNECTION_HANDSHAKE_TIMEOUT_MS),
-            connecting,
-        )
-        .await
-        {
-            if connecting_result.is_err() {
-                stats.connection_errors.fetch_add(1, Ordering::Relaxed);
-            }
-            make_connection_measure.stop();
-            stats
-                .make_connection_ms
-                .fetch_add(make_connection_measure.as_ms(), Ordering::Relaxed);
-
-            let connection = connecting_result?;
-
-            Ok(Self {
-                endpoint,
-                connection: Arc::new(connection),
-            })
-        } else {
-            Err(ConnectionError::TimedOut.into())
+        let connecting_result = connecting.await;
+        if connecting_result.is_err() {
+            stats.connection_errors.fetch_add(1, Ordering::Relaxed);
         }
+        make_connection_measure.stop();
+        stats
+            .make_connection_ms
+            .fetch_add(make_connection_measure.as_ms(), Ordering::Relaxed);
+
+        let connection = connecting_result?;
+
+        Ok(Self {
+            endpoint,
+            connection: Arc::new(connection),
+        })
     }
 
     fn create_endpoint(config: EndpointConfig, client_socket: UdpSocket) -> Endpoint {
-        quinn::Endpoint::new(config, None, client_socket)
-            .expect("QuicNewConnection::create_endpoint quinn::Endpoint::new")
-            .0
+        quinn::Endpoint::new(config, None, client_socket).unwrap().0
     }
 
     // Attempts to make a faster connection by taking advantage of pre-existing key material.
@@ -209,42 +163,21 @@ impl QuicNewConnection {
         addr: SocketAddr,
         stats: &ClientStats,
     ) -> Result<Arc<NewConnection>, WriteError> {
-        let connecting = self
-            .endpoint
-            .connect(addr, "connect")
-            .expect("QuicNewConnection::make_connection_0rtt endpoint.connect");
+        let connecting = self.endpoint.connect(addr, "connect").unwrap();
         stats.total_connections.fetch_add(1, Ordering::Relaxed);
         let connection = match connecting.into_0rtt() {
             Ok((connection, zero_rtt)) => {
-                if let Ok(zero_rtt) = timeout(
-                    Duration::from_millis(QUIC_CONNECTION_HANDSHAKE_TIMEOUT_MS),
-                    zero_rtt,
-                )
-                .await
-                {
-                    if zero_rtt {
-                        stats.zero_rtt_accepts.fetch_add(1, Ordering::Relaxed);
-                    } else {
-                        stats.zero_rtt_rejects.fetch_add(1, Ordering::Relaxed);
-                    }
-                    connection
+                if zero_rtt.await {
+                    stats.zero_rtt_accepts.fetch_add(1, Ordering::Relaxed);
                 } else {
-                    return Err(ConnectionError::TimedOut.into());
+                    stats.zero_rtt_rejects.fetch_add(1, Ordering::Relaxed);
                 }
+                connection
             }
             Err(connecting) => {
                 stats.connection_errors.fetch_add(1, Ordering::Relaxed);
-
-                if let Ok(connecting_result) = timeout(
-                    Duration::from_millis(QUIC_CONNECTION_HANDSHAKE_TIMEOUT_MS),
-                    connecting,
-                )
-                .await
-                {
-                    connecting_result?
-                } else {
-                    return Err(ConnectionError::TimedOut.into());
-                }
+                let connecting = connecting.await;
+                connecting?
             }
         };
         self.connection = Arc::new(connection);
@@ -412,9 +345,7 @@ impl QuicClient {
             "Ran into an error sending transactions {:?}, exhausted retries to {}",
             last_error, self.addr
         );
-        // If we get here but last_error is None, then we have a logic error
-        // in this function, so panic here with an expect to help debugging
-        Err(last_error.expect("QuicClient::_send_buffer last_error.expect"))
+        Err(last_error.unwrap())
     }
 
     pub async fn send_buffer<T>(
@@ -464,7 +395,7 @@ impl QuicClient {
 
         let chunks = buffers[1..buffers.len()]
             .iter()
-            .chunks(QUIC_MAX_UNSTAKED_CONCURRENT_STREAMS);
+            .chunks(QUIC_MAX_CONCURRENT_STREAMS);
 
         let futures: Vec<_> = chunks
             .into_iter()
@@ -489,80 +420,5 @@ impl QuicClient {
 
     pub fn stats(&self) -> Arc<ClientStats> {
         self.stats.clone()
-    }
-}
-
-pub struct QuicTpuConnection {
-    client: Arc<QuicClient>,
-    connection_stats: Arc<ConnectionCacheStats>,
-}
-
-impl QuicTpuConnection {
-    pub fn base_stats(&self) -> Arc<ClientStats> {
-        self.client.stats()
-    }
-
-    pub fn new(
-        endpoint: Arc<QuicLazyInitializedEndpoint>,
-        addr: SocketAddr,
-        connection_stats: Arc<ConnectionCacheStats>,
-    ) -> Self {
-        let client = Arc::new(QuicClient::new(endpoint, addr));
-        Self::new_with_client(client, connection_stats)
-    }
-
-    pub fn new_with_client(
-        client: Arc<QuicClient>,
-        connection_stats: Arc<ConnectionCacheStats>,
-    ) -> Self {
-        Self {
-            client,
-            connection_stats,
-        }
-    }
-}
-
-#[async_trait]
-impl TpuConnection for QuicTpuConnection {
-    fn tpu_addr(&self) -> &SocketAddr {
-        self.client.tpu_addr()
-    }
-
-    async fn send_wire_transaction_batch<T>(&self, buffers: &[T]) -> TransportResult<()>
-    where
-        T: AsRef<[u8]> + Send + Sync,
-    {
-        let stats = ClientStats::default();
-        let len = buffers.len();
-        let res = self
-            .client
-            .send_batch(buffers, &stats, self.connection_stats.clone())
-            .await;
-        self.connection_stats
-            .add_client_stats(&stats, len, res.is_ok());
-        res?;
-        Ok(())
-    }
-
-    async fn send_wire_transaction<T>(&self, wire_transaction: T) -> TransportResult<()>
-    where
-        T: AsRef<[u8]> + Send + Sync,
-    {
-        let stats = Arc::new(ClientStats::default());
-        let send_buffer =
-            self.client
-                .send_buffer(wire_transaction, &stats, self.connection_stats.clone());
-        if let Err(e) = send_buffer.await {
-            warn!(
-                "Failed to send transaction async to {}, error: {:?} ",
-                self.tpu_addr(),
-                e
-            );
-            datapoint_warn!("send-wire-async", ("failure", 1, i64),);
-            self.connection_stats.add_client_stats(&stats, 1, false);
-        } else {
-            self.connection_stats.add_client_stats(&stats, 1, true);
-        }
-        Ok(())
     }
 }

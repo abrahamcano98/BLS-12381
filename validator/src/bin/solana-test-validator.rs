@@ -176,15 +176,6 @@ fn main() {
                 .help("Name of BigTable instance to target"),
         )
         .arg(
-            Arg::with_name("rpc_bigtable_app_profile_id")
-                .long("rpc-bigtable-app-profile-id")
-                .value_name("APP_PROFILE_ID")
-                .takes_value(true)
-                .hidden(true)
-                .default_value(solana_storage_bigtable::DEFAULT_APP_PROFILE_ID)
-                .help("Application profile id to use in Bigtable requests")
-        )
-        .arg(
             Arg::with_name("rpc_pubsub_enable_vote_subscription")
                 .long("rpc-pubsub-enable-vote-subscription")
                 .takes_value(false)
@@ -385,14 +376,6 @@ fn main() {
                 .validator(is_parsable::<u64>)
                 .takes_value(true)
                 .help("Override the runtime's compute unit limit per transaction")
-        )
-        .arg(
-            Arg::with_name("log_messages_bytes_limit")
-                .long("log-messages-bytes-limit")
-                .value_name("BYTES")
-                .validator(is_parsable::<usize>)
-                .takes_value(true)
-                .help("Maximum number of bytes written to the program log before truncation")
         )
         .get_matches();
 
@@ -651,7 +634,6 @@ fn main() {
     genesis.max_ledger_shreds = value_of(&matches, "limit_ledger_size");
     genesis.max_genesis_archive_unpacked_size = Some(u64::MAX);
     genesis.accounts_db_caching_enabled = !matches.is_present("no_accounts_db_caching");
-    genesis.log_messages_bytes_limit = value_t!(matches, "log_messages_bytes_limit", usize).ok();
 
     let tower_storage = Arc::new(FileTowerStorage::new(ledger_path.clone()));
 
@@ -688,11 +670,6 @@ fn main() {
         Some(RpcBigtableConfig {
             enable_bigtable_ledger_upload: false,
             bigtable_instance_name: value_t_or_exit!(matches, "rpc_bigtable_instance", String),
-            bigtable_app_profile_id: value_t_or_exit!(
-                matches,
-                "rpc_bigtable_app_profile_id",
-                String
-            ),
             timeout: None,
         })
     } else {

@@ -195,7 +195,7 @@ function SecurityLabel() {
 function LastVerifiedBuildLabel() {
   return (
     <InfoTooltip text="Indicates whether the program currently deployed on-chain is verified to match the associated published source code, when it is available.">
-      Verifiable Build Status (experimental)
+      Verifiable Build Status
     </InfoTooltip>
   );
 }

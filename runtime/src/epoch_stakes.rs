@@ -55,7 +55,9 @@ impl EpochStakes {
     pub fn vote_account_stake(&self, vote_account: &Pubkey) -> u64 {
         self.stakes
             .vote_accounts()
-            .get_delegated_stake(vote_account)
+            .get(vote_account)
+            .map(|(stake, _)| *stake)
+            .unwrap_or(0)
     }
 
     fn parse_epoch_vote_accounts(

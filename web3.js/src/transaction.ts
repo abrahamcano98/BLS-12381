@@ -258,25 +258,17 @@ export class Transaction {
   ) {
     if (!opts) {
       return;
-    }
-    if (opts.feePayer) {
-      this.feePayer = opts.feePayer;
-    }
-    if (opts.signatures) {
-      this.signatures = opts.signatures;
-    }
-    if (Object.prototype.hasOwnProperty.call(opts, 'lastValidBlockHeight')) {
-      const {blockhash, lastValidBlockHeight} =
-        opts as TransactionBlockhashCtor;
-      this.recentBlockhash = blockhash;
-      this.lastValidBlockHeight = lastValidBlockHeight;
+    } else if (
+      Object.prototype.hasOwnProperty.call(opts, 'lastValidBlockHeight')
+    ) {
+      const newOpts = opts as TransactionBlockhashCtor;
+      Object.assign(this, newOpts);
+      this.recentBlockhash = newOpts.blockhash;
+      this.lastValidBlockHeight = newOpts.lastValidBlockHeight;
     } else {
-      const {recentBlockhash, nonceInfo} =
-        opts as TransactionCtorFields_DEPRECATED;
-      if (nonceInfo) {
-        this.nonceInfo = nonceInfo;
-      }
-      this.recentBlockhash = recentBlockhash;
+      const oldOpts = opts as TransactionCtorFields_DEPRECATED;
+      Object.assign(this, oldOpts);
+      this.recentBlockhash = oldOpts.recentBlockhash;
     }
   }
 
@@ -335,24 +327,17 @@ export class Transaction {
       return this._message;
     }
 
-    let recentBlockhash;
-    let instructions: TransactionInstruction[];
-    if (this.nonceInfo) {
-      recentBlockhash = this.nonceInfo.nonce;
-      if (this.instructions[0] != this.nonceInfo.nonceInstruction) {
-        instructions = [this.nonceInfo.nonceInstruction, ...this.instructions];
-      } else {
-        instructions = this.instructions;
-      }
-    } else {
-      recentBlockhash = this.recentBlockhash;
-      instructions = this.instructions;
+    const {nonceInfo} = this;
+    if (nonceInfo && this.instructions[0] != nonceInfo.nonceInstruction) {
+      this.recentBlockhash = nonceInfo.nonce;
+      this.instructions.unshift(nonceInfo.nonceInstruction);
     }
+    const {recentBlockhash} = this;
     if (!recentBlockhash) {
       throw new Error('Transaction recentBlockhash required');
     }
 
-    if (instructions.length < 1) {
+    if (this.instructions.length < 1) {
       console.warn('No instructions provided');
     }
 
@@ -366,8 +351,8 @@ export class Transaction {
       throw new Error('Transaction fee payer required');
     }
 
-    for (let i = 0; i < instructions.length; i++) {
-      if (instructions[i].programId === undefined) {
+    for (let i = 0; i < this.instructions.length; i++) {
+      if (this.instructions[i].programId === undefined) {
         throw new Error(
           `Transaction instruction index ${i} has undefined program id`,
         );
@@ -376,7 +361,7 @@ export class Transaction {
 
     const programIds: string[] = [];
     const accountMetas: AccountMeta[] = [];
-    instructions.forEach(instruction => {
+    this.instructions.forEach(instruction => {
       instruction.keys.forEach(accountMeta => {
         accountMetas.push({...accountMeta});
       });
@@ -486,7 +471,7 @@ export class Transaction {
     });
 
     const accountKeys = signedKeys.concat(unsignedKeys);
-    const compiledInstructions: CompiledInstruction[] = instructions.map(
+    const instructions: CompiledInstruction[] = this.instructions.map(
       instruction => {
         const {data, programId} = instruction;
         return {
@@ -499,7 +484,7 @@ export class Transaction {
       },
     );
 
-    compiledInstructions.forEach(instruction => {
+    instructions.forEach(instruction => {
       invariant(instruction.programIdIndex >= 0);
       instruction.accounts.forEach(keyIndex => invariant(keyIndex >= 0));
     });
@@ -512,7 +497,7 @@ export class Transaction {
       },
       accountKeys,
       recentBlockhash,
-      instructions: compiledInstructions,
+      instructions,
     });
   }
 

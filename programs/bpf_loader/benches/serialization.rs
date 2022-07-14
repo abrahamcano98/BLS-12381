@@ -92,12 +92,12 @@ fn create_inputs() -> TransactionContext {
         .into_iter()
         .enumerate()
         .map(
-            |(instruction_account_index, index_in_transaction)| InstructionAccount {
-                index_in_caller: instruction_account_index,
+            |(index_in_instruction, index_in_transaction)| InstructionAccount {
+                index_in_caller: index_in_instruction,
                 index_in_transaction,
-                index_in_callee: instruction_account_index,
+                index_in_callee: index_in_instruction,
                 is_signer: false,
-                is_writable: instruction_account_index >= 4,
+                is_writable: index_in_instruction >= 4,
             },
         )
         .collect::<Vec<_>>();

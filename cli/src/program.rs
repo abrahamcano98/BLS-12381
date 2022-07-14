@@ -22,7 +22,7 @@ use {
         connection_cache::ConnectionCache,
         rpc_client::RpcClient,
         rpc_config::{RpcAccountInfoConfig, RpcProgramAccountsConfig, RpcSendTransactionConfig},
-        rpc_filter::{Memcmp, RpcFilterType},
+        rpc_filter::{Memcmp, MemcmpEncodedBytes, RpcFilterType},
         tpu_client::{TpuClient, TpuClientConfig},
     },
     solana_program_runtime::invoke_context::InvokeContext,
@@ -1203,19 +1203,24 @@ fn get_buffers(
     authority_pubkey: Option<Pubkey>,
     use_lamports_unit: bool,
 ) -> Result<CliUpgradeableBuffers, Box<dyn std::error::Error>> {
-    let mut filters = vec![RpcFilterType::Memcmp(Memcmp::new_base58_encoded(
-        0,
-        &[1, 0, 0, 0],
-    ))];
+    let mut filters = vec![RpcFilterType::Memcmp(Memcmp {
+        offset: 0,
+        bytes: MemcmpEncodedBytes::Base58(bs58::encode(vec![1, 0, 0, 0]).into_string()),
+        encoding: None,
+    })];
     if let Some(authority_pubkey) = authority_pubkey {
-        filters.push(RpcFilterType::Memcmp(Memcmp::new_base58_encoded(
-            ACCOUNT_TYPE_SIZE,
-            &[1],
-        )));
-        filters.push(RpcFilterType::Memcmp(Memcmp::new_base58_encoded(
-            ACCOUNT_TYPE_SIZE + OPTION_SIZE,
-            authority_pubkey.as_ref(),
-        )));
+        filters.push(RpcFilterType::Memcmp(Memcmp {
+            offset: ACCOUNT_TYPE_SIZE,
+            bytes: MemcmpEncodedBytes::Base58(bs58::encode(vec![1]).into_string()),
+            encoding: None,
+        }));
+        filters.push(RpcFilterType::Memcmp(Memcmp {
+            offset: ACCOUNT_TYPE_SIZE + OPTION_SIZE,
+            bytes: MemcmpEncodedBytes::Base58(
+                bs58::encode(authority_pubkey.as_ref()).into_string(),
+            ),
+            encoding: None,
+        }));
     }
 
     let results = get_accounts_with_filter(
@@ -1251,19 +1256,24 @@ fn get_programs(
     authority_pubkey: Option<Pubkey>,
     use_lamports_unit: bool,
 ) -> Result<CliUpgradeablePrograms, Box<dyn std::error::Error>> {
-    let mut filters = vec![RpcFilterType::Memcmp(Memcmp::new_base58_encoded(
-        0,
-        &[3, 0, 0, 0],
-    ))];
+    let mut filters = vec![RpcFilterType::Memcmp(Memcmp {
+        offset: 0,
+        bytes: MemcmpEncodedBytes::Base58(bs58::encode(vec![3, 0, 0, 0]).into_string()),
+        encoding: None,
+    })];
     if let Some(authority_pubkey) = authority_pubkey {
-        filters.push(RpcFilterType::Memcmp(Memcmp::new_base58_encoded(
-            ACCOUNT_TYPE_SIZE + SLOT_SIZE,
-            &[1],
-        )));
-        filters.push(RpcFilterType::Memcmp(Memcmp::new_base58_encoded(
-            ACCOUNT_TYPE_SIZE + SLOT_SIZE + OPTION_SIZE,
-            authority_pubkey.as_ref(),
-        )));
+        filters.push(RpcFilterType::Memcmp(Memcmp {
+            offset: ACCOUNT_TYPE_SIZE + SLOT_SIZE,
+            bytes: MemcmpEncodedBytes::Base58(bs58::encode(vec![1]).into_string()),
+            encoding: None,
+        }));
+        filters.push(RpcFilterType::Memcmp(Memcmp {
+            offset: ACCOUNT_TYPE_SIZE + SLOT_SIZE + OPTION_SIZE,
+            bytes: MemcmpEncodedBytes::Base58(
+                bs58::encode(authority_pubkey.as_ref()).into_string(),
+            ),
+            encoding: None,
+        }));
     }
 
     let results = get_accounts_with_filter(
@@ -1281,7 +1291,11 @@ fn get_programs(
         {
             let mut bytes = vec![2, 0, 0, 0];
             bytes.extend_from_slice(programdata_address.as_ref());
-            let filters = vec![RpcFilterType::Memcmp(Memcmp::new_base58_encoded(0, &bytes))];
+            let filters = vec![RpcFilterType::Memcmp(Memcmp {
+                offset: 0,
+                bytes: MemcmpEncodedBytes::Base58(bs58::encode(bytes).into_string()),
+                encoding: None,
+            })];
 
             let results = get_accounts_with_filter(rpc_client, filters, 0)?;
             if results.len() != 1 {
@@ -1607,12 +1621,12 @@ fn process_close(
                         }) = account.state()
                         {
                             if authority_pubkey != Some(authority_signer.pubkey()) {
-                                Err(format!(
+                                return Err(format!(
                                     "Program authority {:?} does not match {:?}",
                                     authority_pubkey,
                                     Some(authority_signer.pubkey())
                                 )
-                                .into())
+                                .into());
                             } else {
                                 close(
                                     rpc_client,
@@ -1631,16 +1645,22 @@ fn process_close(
                                 ))
                             }
                         } else {
-                            Err(format!("Program {} has been closed", account_pubkey).into())
+                            return Err(
+                                format!("Program {} has been closed", account_pubkey).into()
+                            );
                         }
                     } else {
-                        Err(format!("Program {} has been closed", account_pubkey).into())
+                        return Err(format!("Program {} has been closed", account_pubkey).into());
                     }
                 }
-                _ => Err(format!("{} is not a Program or Buffer account", account_pubkey).into()),
+                _ => {
+                    return Err(
+                        format!("{} is not a Program or Buffer account", account_pubkey).into(),
+                    );
+                }
             }
         } else {
-            Err(format!("Unable to find the account {}", account_pubkey).into())
+            return Err(format!("Unable to find the account {}", account_pubkey).into());
         }
     } else {
         let buffers = get_buffers(

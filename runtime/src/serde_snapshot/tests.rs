@@ -4,11 +4,10 @@ use {
     crate::{
         accounts::{test_utils::create_test_accounts, Accounts},
         accounts_db::{get_temp_accounts_paths, AccountShrinkThreshold},
-        bank::{Bank, Rewrites},
+        bank::{Bank, Rewrites, StatusCacheRc},
         genesis_utils::{activate_all_features, activate_feature},
         hardened_unpack::UnpackedAppendVecMap,
         snapshot_utils::ArchiveFormat,
-        status_cache::StatusCache,
     },
     bincode::serialize_into,
     rand::{thread_rng, Rng},
@@ -23,7 +22,6 @@ use {
     std::{
         io::{BufReader, Cursor},
         path::Path,
-        sync::{Arc, RwLock},
     },
     tempfile::TempDir,
 };
@@ -90,6 +88,7 @@ where
         false,
         Some(crate::accounts_db::ACCOUNTS_DB_CONFIG_FOR_TESTING),
         None,
+        false,
     )
     .map(|(accounts_db, _)| accounts_db)
 }
@@ -268,7 +267,7 @@ fn test_bank_serialize_style(
             // This make serialized bytes not deterministic.
             // But, we can guarantee that the buffer is different if we change the hash!
             assert_ne!(buf, buf_reserialized);
-            buf = buf_reserialized;
+            std::mem::swap(&mut buf, &mut buf_reserialized);
         }
     }
 
@@ -277,8 +276,8 @@ fn test_bank_serialize_style(
 
     // Create a new set of directories for this bank's accounts
     let (_accounts_dir, dbank_paths) = get_temp_accounts_paths(4).unwrap();
-    let mut status_cache = StatusCache::default();
-    status_cache.add_root(2);
+    let ref_sc = StatusCacheRc::default();
+    ref_sc.status_cache.write().unwrap().add_root(2);
     // Create a directory to simulate AppendVecs unpackaged from a snapshot tar
     let copied_accounts = TempDir::new().unwrap();
     let unpacked_append_vec_map =
@@ -302,9 +301,10 @@ fn test_bank_serialize_style(
         false,
         Some(crate::accounts_db::ACCOUNTS_DB_CONFIG_FOR_TESTING),
         None,
+        false,
     )
     .unwrap();
-    dbank.status_cache = Arc::new(RwLock::new(status_cache));
+    dbank.src = ref_sc;
     assert_eq!(dbank.get_balance(&key1.pubkey()), 0);
     assert_eq!(dbank.get_balance(&key2.pubkey()), 10);
     assert_eq!(dbank.get_balance(&key3.pubkey()), 0);
@@ -417,6 +417,7 @@ fn test_extra_fields_eof() {
         false,
         Some(crate::accounts_db::ACCOUNTS_DB_CONFIG_FOR_TESTING),
         None,
+        false,
     )
     .unwrap();
 
@@ -538,6 +539,7 @@ fn test_blank_extra_fields() {
         false,
         Some(crate::accounts_db::ACCOUNTS_DB_CONFIG_FOR_TESTING),
         None,
+        false,
     )
     .unwrap();
 

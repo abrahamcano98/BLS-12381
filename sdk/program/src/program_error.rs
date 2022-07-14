@@ -53,8 +53,8 @@ pub enum ProgramError {
     IllegalOwner,
     #[error("Account data allocation exceeded the maximum accounts data size limit")]
     MaxAccountsDataSizeExceeded,
-    #[error("Account data reallocation was invalid")]
-    InvalidRealloc,
+    #[error("Cannot close vote account unless it stopped voting at least one full epoch ago")]
+    ActiveVoteAccountClose,
 }
 
 pub trait PrintProgramError {
@@ -94,7 +94,7 @@ impl PrintProgramError for ProgramError {
             Self::UnsupportedSysvar => msg!("Error: UnsupportedSysvar"),
             Self::IllegalOwner => msg!("Error: IllegalOwner"),
             Self::MaxAccountsDataSizeExceeded => msg!("Error: MaxAccountsDataSizeExceeded"),
-            Self::InvalidRealloc => msg!("Error: InvalidRealloc"),
+            Self::ActiveVoteAccountClose => msg!("Error: ActiveVoteAccountClose"),
         }
     }
 }
@@ -126,7 +126,7 @@ pub const ACCOUNT_NOT_RENT_EXEMPT: u64 = to_builtin!(16);
 pub const UNSUPPORTED_SYSVAR: u64 = to_builtin!(17);
 pub const ILLEGAL_OWNER: u64 = to_builtin!(18);
 pub const MAX_ACCOUNTS_DATA_SIZE_EXCEEDED: u64 = to_builtin!(19);
-pub const INVALID_ACCOUNT_DATA_REALLOC: u64 = to_builtin!(20);
+pub const ACTIVE_VOTE_ACCOUNT_CLOSE: u64 = to_builtin!(20);
 // Warning: Any new program errors added here must also be:
 // - Added to the below conversions
 // - Added as an equivalent to InstructionError
@@ -154,7 +154,7 @@ impl From<ProgramError> for u64 {
             ProgramError::UnsupportedSysvar => UNSUPPORTED_SYSVAR,
             ProgramError::IllegalOwner => ILLEGAL_OWNER,
             ProgramError::MaxAccountsDataSizeExceeded => MAX_ACCOUNTS_DATA_SIZE_EXCEEDED,
-            ProgramError::InvalidRealloc => INVALID_ACCOUNT_DATA_REALLOC,
+            ProgramError::ActiveVoteAccountClose => ACTIVE_VOTE_ACCOUNT_CLOSE,
             ProgramError::Custom(error) => {
                 if error == 0 {
                     CUSTOM_ZERO
@@ -188,7 +188,7 @@ impl From<u64> for ProgramError {
             UNSUPPORTED_SYSVAR => Self::UnsupportedSysvar,
             ILLEGAL_OWNER => Self::IllegalOwner,
             MAX_ACCOUNTS_DATA_SIZE_EXCEEDED => Self::MaxAccountsDataSizeExceeded,
-            INVALID_ACCOUNT_DATA_REALLOC => Self::InvalidRealloc,
+            ACTIVE_VOTE_ACCOUNT_CLOSE => Self::ActiveVoteAccountClose,
             _ => Self::Custom(error as u32),
         }
     }
@@ -218,7 +218,7 @@ impl TryFrom<InstructionError> for ProgramError {
             Self::Error::UnsupportedSysvar => Ok(Self::UnsupportedSysvar),
             Self::Error::IllegalOwner => Ok(Self::IllegalOwner),
             Self::Error::MaxAccountsDataSizeExceeded => Ok(Self::MaxAccountsDataSizeExceeded),
-            Self::Error::InvalidRealloc => Ok(Self::InvalidRealloc),
+            Self::Error::ActiveVoteAccountClose => Ok(Self::ActiveVoteAccountClose),
             _ => Err(error),
         }
     }
@@ -250,7 +250,7 @@ where
             UNSUPPORTED_SYSVAR => Self::UnsupportedSysvar,
             ILLEGAL_OWNER => Self::IllegalOwner,
             MAX_ACCOUNTS_DATA_SIZE_EXCEEDED => Self::MaxAccountsDataSizeExceeded,
-            INVALID_ACCOUNT_DATA_REALLOC => Self::InvalidRealloc,
+            ACTIVE_VOTE_ACCOUNT_CLOSE => Self::ActiveVoteAccountClose,
             _ => {
                 // A valid custom error has no bits set in the upper 32
                 if error >> BUILTIN_BIT_SHIFT == 0 {

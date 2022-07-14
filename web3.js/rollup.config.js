@@ -12,7 +12,7 @@ const env = process.env.NODE_ENV;
 const extensions = ['.js', '.ts'];
 
 function generateConfig(configType, format) {
-  const browser = configType === 'browser' || configType === 'react-native';
+  const browser = configType === 'browser';
   const bundle = format === 'iife';
 
   const config = {
@@ -71,9 +71,6 @@ function generateConfig(configType, format) {
         values: {
           'process.env.NODE_ENV': JSON.stringify(env),
           'process.env.BROWSER': JSON.stringify(browser),
-          'process.env.npm_package_version': JSON.stringify(
-            process.env.npm_package_version,
-          ),
         },
       }),
     ],
@@ -91,7 +88,7 @@ function generateConfig(configType, format) {
     },
   };
 
-  if (!browser) {
+  if (configType !== 'browser') {
     // Prevent dependencies from being bundled
     config.external = [
       /@babel\/runtime/,
@@ -114,7 +111,6 @@ function generateConfig(configType, format) {
 
   switch (configType) {
     case 'browser':
-    case 'react-native':
       switch (format) {
         case 'iife': {
           config.external = ['http', 'https', 'node-fetch'];
@@ -140,20 +136,16 @@ function generateConfig(configType, format) {
         default: {
           config.output = [
             {
-              file: `lib/index.${
-                configType === 'react-native' ? 'native' : 'browser.cjs'
-              }.js`,
+              file: 'lib/index.browser.cjs.js',
               format: 'cjs',
               sourcemap: true,
             },
-            configType === 'browser'
-              ? {
-                  file: 'lib/index.browser.esm.js',
-                  format: 'es',
-                  sourcemap: true,
-                }
-              : null,
-          ].filter(Boolean);
+            {
+              file: 'lib/index.browser.esm.js',
+              format: 'es',
+              sourcemap: true,
+            },
+          ];
 
           // Prevent dependencies from being bundled
           config.external = [
@@ -170,7 +162,6 @@ function generateConfig(configType, format) {
             'jayson/lib/client/browser',
             'js-sha3',
             'node-fetch',
-            'react-native-url-polyfill',
             'rpc-websockets',
             'secp256k1',
             'superstruct',
@@ -211,5 +202,4 @@ export default [
   generateConfig('node'),
   generateConfig('browser'),
   generateConfig('browser', 'iife'),
-  generateConfig('react-native'),
 ];

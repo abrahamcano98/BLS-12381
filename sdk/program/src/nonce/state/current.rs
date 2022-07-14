@@ -53,8 +53,12 @@ impl Data {
 }
 
 impl DurableNonce {
-    pub fn from_blockhash(blockhash: &Hash) -> Self {
-        Self(hashv(&[DURABLE_NONCE_HASH_PREFIX, blockhash.as_ref()]))
+    pub fn from_blockhash(blockhash: &Hash, separate_domains: bool) -> Self {
+        Self(if separate_domains {
+            hashv(&[DURABLE_NONCE_HASH_PREFIX, blockhash.as_ref()])
+        } else {
+            *blockhash
+        })
     }
 
     /// Hash value used as recent_blockhash field in Transactions.
@@ -106,7 +110,10 @@ mod test {
 
     #[test]
     fn test_nonce_state_size() {
-        let data = Versions::new(State::Initialized(Data::default()));
+        let data = Versions::new(
+            State::Initialized(Data::default()),
+            true, // separate_domains
+        );
         let size = bincode::serialized_size(&data).unwrap();
         assert_eq!(State::size() as u64, size);
     }

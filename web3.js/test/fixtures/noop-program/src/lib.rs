@@ -1,8 +1,7 @@
 //! Example Rust-based BPF program that prints out the parameters passed to it
 
 use solana_program::{
-    account_info::AccountInfo, entrypoint::ProgramResult, log::*, msg, program::set_return_data,
-    pubkey::Pubkey,
+    account_info::AccountInfo, entrypoint::ProgramResult, log::*, msg, pubkey::Pubkey,
 };
 
 #[derive(Debug, PartialEq)]
@@ -54,12 +53,6 @@ fn process_instruction(
         // Test - arch config
         #[cfg(not(target_os = "solana"))]
         panic!();
-    }
-
-    {
-        // return data in simulate transaction
-        let return_data: &[u8] = &[1, 2, 3];
-        set_return_data(return_data);
     }
 
     Ok(())

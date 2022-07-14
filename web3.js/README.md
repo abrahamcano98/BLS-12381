@@ -23,10 +23,7 @@
 
 This is the Solana Javascript API built on the Solana [JSON RPC API](https://docs.solana.com/apps/jsonrpc-api)
 
-## Documentation and examples
-
- - [The Solana Cookbook](https://solanacookbook.com/) has extensive task-based documentation using this library.
- - For more detail on individual functions, see the [latest API Documentation](https://solana-labs.github.io/solana-web3.js/)
+[Latest API Documentation](https://solana-labs.github.io/solana-web3.js/)
 
 ## Installation
 
@@ -86,6 +83,16 @@ console.log(solanaWeb3);
 // `solanaWeb3` is provided in the global namespace by the `solanaWeb3.min.js` script bundle.
 console.log(solanaWeb3);
 ```
+
+## Examples
+
+Example scripts for the web3.js repo and native programs:
+
+- [Web3 Examples](https://github.com/solana-labs/solana/tree/master/web3.js/examples)
+
+Example scripts for the Solana Program Library:
+
+- [Token Program Examples](https://github.com/solana-labs/solana-program-library/tree/master/token/js/examples)
 
 ## Flow Support (Discontinued)
 

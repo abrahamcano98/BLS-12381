@@ -2,7 +2,7 @@
 use {
     solana_entry::entry::Entry,
     solana_ledger::shred::{
-        max_entries_per_n_shred, verify_test_data_shred, ProcessShredsStats, Shred, Shredder,
+        max_entries_per_n_shred, verify_test_data_shred, Shred, Shredder,
         LEGACY_SHRED_DATA_CAPACITY, MAX_DATA_SHREDS_PER_FEC_BLOCK,
     },
     solana_sdk::{
@@ -49,12 +49,9 @@ fn test_multi_fec_block_coding() {
 
     let serialized_entries = bincode::serialize(&entries).unwrap();
     let (data_shreds, coding_shreds) = shredder.entries_to_shreds(
-        &keypair,
-        &entries,
-        true, // is_last_in_slot
+        &keypair, &entries, true, // is_last_in_slot
         0,    // next_shred_index
         0,    // next_code_index
-        &mut ProcessShredsStats::default(),
     );
     let next_index = data_shreds.last().unwrap().index() + 1;
     assert_eq!(next_index as usize, num_data_shreds);
@@ -122,6 +119,8 @@ fn test_multi_fec_block_different_size_coding() {
     // Test recovery
     for (fec_data_shreds, fec_coding_shreds) in fec_data.values().zip(fec_coding.values()) {
         let first_data_index = fec_data_shreds.first().unwrap().index() as usize;
+        let first_code_index = fec_coding_shreds.first().unwrap().index() as usize;
+        assert_eq!(first_data_index, first_code_index);
         let all_shreds: Vec<Shred> = fec_data_shreds
             .iter()
             .step_by(2)
@@ -214,8 +213,7 @@ fn setup_different_sized_fec_blocks(
         .collect();
 
     // Run the shredder twice, generate data and coding shreds
-    let mut next_shred_index = 0;
-    let mut next_code_index = 0;
+    let mut next_index = 0;
     let mut fec_data = BTreeMap::new();
     let mut fec_coding = BTreeMap::new();
     let mut data_slot_and_index = HashSet::new();
@@ -225,12 +223,8 @@ fn setup_different_sized_fec_blocks(
     for i in 0..2 {
         let is_last = i == 1;
         let (data_shreds, coding_shreds) = shredder.entries_to_shreds(
-            &keypair,
-            &entries,
-            is_last,
-            next_shred_index,
-            next_code_index,
-            &mut ProcessShredsStats::default(),
+            &keypair, &entries, is_last, next_index, // next_shred_index
+            next_index, // next_code_index
         );
         for shred in &data_shreds {
             if (shred.index() as usize) == total_num_data_shreds - 1 {
@@ -244,8 +238,7 @@ fn setup_different_sized_fec_blocks(
             }
         }
         assert_eq!(data_shreds.len(), num_shreds_per_iter as usize);
-        next_shred_index = data_shreds.last().unwrap().index() + 1;
-        next_code_index = coding_shreds.last().unwrap().index() + 1;
+        next_index = data_shreds.last().unwrap().index() + 1;
         sort_data_coding_into_fec_sets(
             data_shreds,
             coding_shreds,

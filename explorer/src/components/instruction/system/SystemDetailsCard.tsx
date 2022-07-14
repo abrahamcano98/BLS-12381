@@ -18,7 +18,6 @@ import { NonceAdvanceDetailsCard } from "./NonceAdvanceDetailsCard";
 import { NonceWithdrawDetailsCard } from "./NonceWithdrawDetailsCard";
 import { NonceAuthorizeDetailsCard } from "./NonceAuthorizeDetailsCard";
 import { TransferWithSeedDetailsCard } from "./TransferWithSeedDetailsCard";
-import { UpgradeNonceDetailsCard } from "./UpgradeNonceDetailsCard";
 import { ParsedInfo } from "validators";
 import { create } from "superstruct";
 import { reportError } from "utils/sentry";
@@ -35,7 +34,6 @@ import {
   InitializeNonceInfo,
   WithdrawNonceInfo,
   TransferWithSeedInfo,
-  UpgradeNonceInfo,
 } from "./types";
 
 type DetailsProps = {
@@ -98,10 +96,6 @@ export function SystemDetailsCard(props: DetailsProps) {
       case "transferWithSeed": {
         const info = create(parsed.info, TransferWithSeedInfo);
         return <TransferWithSeedDetailsCard info={info} {...props} />;
-      }
-      case "upgradeNonce": {
-        const info = create(parsed.info, UpgradeNonceInfo);
-        return <UpgradeNonceDetailsCard info={info} {...props} />;
       }
       default:
         return <UnknownDetailsCard {...props} />;

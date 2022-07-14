@@ -294,7 +294,8 @@ pub mod tests {
 
     impl RollingBitField {
         pub fn clear(&mut self) {
-            *self = Self::new(self.max_width);
+            let mut n = Self::new(self.max_width);
+            std::mem::swap(&mut n, self);
         }
     }
 

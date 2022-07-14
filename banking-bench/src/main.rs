@@ -30,7 +30,7 @@ use {
     },
     solana_streamer::socket::SocketAddrSpace,
     std::{
-        sync::{atomic::Ordering, Arc, RwLock},
+        sync::{atomic::Ordering, Arc, Mutex, RwLock},
         thread::sleep,
         time::{Duration, Instant},
     },
@@ -39,7 +39,7 @@ use {
 fn check_txs(
     receiver: &Arc<Receiver<WorkingBankEntry>>,
     ref_tx_count: usize,
-    poh_recorder: &Arc<RwLock<PohRecorder>>,
+    poh_recorder: &Arc<Mutex<PohRecorder>>,
 ) -> bool {
     let mut total = 0;
     let now = Instant::now();
@@ -55,7 +55,7 @@ fn check_txs(
         if now.elapsed().as_secs() > 60 {
             break;
         }
-        if poh_recorder.read().unwrap().bank().is_none() {
+        if poh_recorder.lock().unwrap().bank().is_none() {
             no_bank = true;
             break;
         }
@@ -214,12 +214,6 @@ fn main() {
                 .help("Number of threads to use in the banking stage"),
         )
         .arg(
-            Arg::new("log_messages_bytes_limit")
-                .long("log-messages-bytes-limit")
-                .takes_value(false)
-                .help("Maximum number of bytes written to the program log before truncation"),
-        )
-        .arg(
             Arg::new("tpu_use_quic")
                 .long("tpu-use-quic")
                 .takes_value(false)
@@ -242,7 +236,6 @@ fn main() {
     let write_lock_contention = matches
         .value_of_t::<WriteLockContention>("write_lock_contention")
         .unwrap_or(WriteLockContention::None);
-    let log_messages_bytes_limit = matches.value_of_t::<usize>("log_messages_bytes_limit").ok();
 
     let mint_total = 1_000_000_000_000;
     let GenesisConfigInfo {
@@ -256,8 +249,8 @@ fn main() {
     let (tpu_vote_sender, tpu_vote_receiver) = unbounded();
     let (replay_vote_sender, _replay_vote_receiver) = unbounded();
     let bank0 = Bank::new_for_benches(&genesis_config);
-    let bank_forks = Arc::new(RwLock::new(BankForks::new(bank0)));
-    let mut bank = bank_forks.read().unwrap().working_bank();
+    let mut bank_forks = BankForks::new(bank0);
+    let mut bank = bank_forks.working_bank();
 
     // set cost tracker limits to MAX so it will not filter out TXs
     bank.write_cost_tracker()
@@ -349,10 +342,6 @@ fn main() {
         );
         let cluster_info = Arc::new(cluster_info);
         let tpu_use_quic = matches.is_present("tpu_use_quic");
-        let connection_cache = match tpu_use_quic {
-            true => ConnectionCache::new(DEFAULT_TPU_CONNECTION_POOL_SIZE),
-            false => ConnectionCache::with_udp(DEFAULT_TPU_CONNECTION_POOL_SIZE),
-        };
         let banking_stage = BankingStage::new_num_threads(
             &cluster_info,
             &poh_recorder,
@@ -363,11 +352,12 @@ fn main() {
             None,
             replay_vote_sender,
             Arc::new(RwLock::new(CostModel::default())),
-            log_messages_bytes_limit,
-            Arc::new(connection_cache),
-            bank_forks.clone(),
+            Arc::new(ConnectionCache::new(
+                tpu_use_quic,
+                DEFAULT_TPU_CONNECTION_POOL_SIZE,
+            )),
         );
-        poh_recorder.write().unwrap().set_bank(&bank, false);
+        poh_recorder.lock().unwrap().set_bank(&bank);
 
         // This is so that the signal_receiver does not go out of scope after the closure.
         // If it is dropped before poh_service, then poh_service will error when
@@ -405,7 +395,7 @@ fn main() {
                     if bank.get_signature_status(&tx.signatures[0]).is_some() {
                         break;
                     }
-                    if poh_recorder.read().unwrap().bank().is_none() {
+                    if poh_recorder.lock().unwrap().bank().is_none() {
                         break;
                     }
                     sleep(Duration::from_millis(5));
@@ -427,7 +417,7 @@ fn main() {
 
                 let mut poh_time = Measure::start("poh_time");
                 poh_recorder
-                    .write()
+                    .lock()
                     .unwrap()
                     .reset(bank.clone(), Some((bank.slot(), bank.slot() + 1)));
                 poh_time.stop();
@@ -437,8 +427,8 @@ fn main() {
                 new_bank_time.stop();
 
                 let mut insert_time = Measure::start("insert_time");
-                bank_forks.write().unwrap().insert(new_bank);
-                bank = bank_forks.read().unwrap().working_bank();
+                bank_forks.insert(new_bank);
+                bank = bank_forks.working_bank();
                 insert_time.stop();
 
                 // set cost tracker limits to MAX so it will not filter out TXs
@@ -448,14 +438,11 @@ fn main() {
                     std::u64::MAX,
                 );
 
-                poh_recorder.write().unwrap().set_bank(&bank, false);
-                assert!(poh_recorder.read().unwrap().bank().is_some());
+                poh_recorder.lock().unwrap().set_bank(&bank);
+                assert!(poh_recorder.lock().unwrap().bank().is_some());
                 if bank.slot() > 32 {
                     leader_schedule_cache.set_root(&bank);
-                    bank_forks
-                        .write()
-                        .unwrap()
-                        .set_root(root, &AbsRequestSender::default(), None);
+                    bank_forks.set_root(root, &AbsRequestSender::default(), None);
                     root += 1;
                 }
                 debug!(
@@ -488,11 +475,7 @@ fn main() {
                 }
             }
         }
-        let txs_processed = bank_forks
-            .read()
-            .unwrap()
-            .working_bank()
-            .transaction_count();
+        let txs_processed = bank_forks.working_bank().transaction_count();
         debug!("processed: {} base: {}", txs_processed, base_tx_count);
         eprintln!(
             "{{'name': 'banking_bench_total', 'median': '{:.2}'}}",

@@ -9,3 +9,6 @@ pub mod edwards;
 pub mod errors;
 pub mod ristretto;
 pub mod scalar;
+pub mod bls12381;
+pub mod bls12381lib;
+pub mod parsers;
